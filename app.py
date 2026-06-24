@@ -37,11 +37,12 @@ def init_db():
         CREATE TABLE IF NOT EXISTS movies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
-            type TEXT NOT NULL CHECK(type IN ('movie', 'series')),
+            type TEXT NOT NULL CHECK(type IN ('movie', 'series', 'anime')),
             genre TEXT,
             release_year INTEGER,
             rating REAL,
-            duration TEXT,
+            duration INTEGER,
+            episodes INTEGER,
             description TEXT,
             poster_url TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -190,7 +191,8 @@ def add_item():
         genre = request.form['genre']
         release_year = request.form['release_year']
         rating = request.form['rating']
-        duration = request.form['duration']
+        duration = request.form.get('duration', type=int)
+        episodes = request.form.get('episodes', type=int)
         description = request.form['description']
         poster_url = request.form['poster_url']
         
@@ -198,9 +200,9 @@ def add_item():
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO movies (title, type, genre, release_year, rating, duration, description, poster_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (title, item_type, genre, release_year, rating, duration, description, poster_url))
+            INSERT INTO movies (title, type, genre, release_year, rating, duration, episodes, description, poster_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (title, item_type, genre, release_year, rating, duration, episodes, description, poster_url))
         
         conn.commit()
         conn.close()
@@ -223,16 +225,17 @@ def edit_item(id):
         genre = request.form['genre']
         release_year = request.form['release_year']
         rating = request.form['rating']
-        duration = request.form['duration']
+        duration = request.form.get('duration', type=int)
+        episodes = request.form.get('episodes', type=int)
         description = request.form['description']
         poster_url = request.form['poster_url']
         
         cursor.execute('''
             UPDATE movies 
             SET title = ?, type = ?, genre = ?, release_year = ?, rating = ?, 
-                duration = ?, description = ?, poster_url = ?
+                duration = ?, episodes = ?, description = ?, poster_url = ?
             WHERE id = ?
-        ''', (title, item_type, genre, release_year, rating, duration, description, poster_url, id))
+        ''', (title, item_type, genre, release_year, rating, duration, episodes, description, poster_url, id))
         
         conn.commit()
         conn.close()
@@ -359,6 +362,14 @@ def filter_items(filter_type):
             WHERE m.type = 'series'
             ORDER BY m.created_at DESC
         ''')
+    elif filter_type == 'anime':
+        cursor.execute('''
+            SELECT m.*, w.status, w.rating as user_rating 
+            FROM movies m 
+            LEFT JOIN watchlist w ON m.id = w.movie_id 
+            WHERE m.type = 'anime'
+            ORDER BY m.created_at DESC
+        ''')
     elif filter_type == 'watchlist':
         return redirect(url_for('watchlist'))
     else:
@@ -374,9 +385,11 @@ if __name__ == '__main__':
     if not os.path.exists(DATABASE):
         init_db()
     else:
-        # Ensure users table exists in existing databases
+        # Migrate existing database
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Ensure users table exists
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -385,6 +398,84 @@ if __name__ == '__main__':
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Add episodes column if it doesn't exist
+        cursor.execute("PRAGMA table_info(movies)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'episodes' not in columns:
+            cursor.execute('ALTER TABLE movies ADD COLUMN episodes INTEGER')
+        
+        # Migrate duration from TEXT to INTEGER if needed
+        if 'duration' in columns:
+            cursor.execute("PRAGMA table_info(movies)")
+            col_info = {col[1]: col for col in cursor.fetchall()}
+            duration_type = col_info.get('duration', [None, None, None])[2]
+            if duration_type and duration_type.upper() == 'TEXT':
+                # Create new table with correct schema and migrate data
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS movies_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        type TEXT NOT NULL CHECK(type IN ('movie', 'series', 'anime')),
+                        genre TEXT,
+                        release_year INTEGER,
+                        rating REAL,
+                        duration INTEGER,
+                        episodes INTEGER,
+                        description TEXT,
+                        poster_url TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                cursor.execute('''
+                    INSERT INTO movies_new (id, title, type, genre, release_year, rating, duration, description, poster_url, created_at)
+                    SELECT id, title, type, genre, release_year, rating, 
+                           CAST(duration AS INTEGER), description, poster_url, created_at
+                    FROM movies
+                ''')
+                cursor.execute('DROP TABLE movies')
+                cursor.execute('ALTER TABLE movies_new RENAME TO movies')
+        
+        # Update CHECK constraint to include 'anime' - recreate table if needed
+        cursor.execute("PRAGMA table_info(movies)")
+        columns_after = [col[1] for col in cursor.fetchall()]
+        
+        if 'episodes' in columns_after:
+            # Check if old CHECK constraint still restricts 'anime'
+            cursor.execute("SELECT DISTINCT type FROM movies")
+            existing_types = [row[0] for row in cursor.fetchall()]
+            if existing_types and all(t not in ('anime',) for t in existing_types):
+                # Try inserting a temp value to test constraint
+                try:
+                    cursor.execute("INSERT INTO movies (title, type) VALUES ('__test__', 'anime')")
+                    cursor.execute("DELETE FROM movies WHERE title = '__test__'")
+                except sqlite3.OperationalError as e:
+                    if 'CHECK' in str(e) or 'constraint' in str(e):
+                        # Recreate table with new CHECK constraint
+                        cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS movies_new2 (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                title TEXT NOT NULL,
+                                type TEXT NOT NULL CHECK(type IN ('movie', 'series', 'anime')),
+                                genre TEXT,
+                                release_year INTEGER,
+                                rating REAL,
+                                duration INTEGER,
+                                episodes INTEGER,
+                                description TEXT,
+                                poster_url TEXT,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            )
+                        ''')
+                        cursor.execute('''
+                            INSERT INTO movies_new2 (id, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at)
+                            SELECT id, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at
+                            FROM movies
+                        ''')
+                        cursor.execute('DROP TABLE movies')
+                        cursor.execute('ALTER TABLE movies_new2 RENAME TO movies')
+        
         conn.commit()
         conn.close()
     

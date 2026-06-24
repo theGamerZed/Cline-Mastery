@@ -215,6 +215,10 @@ footer {
     color: #212529 !important;
 }
 
+.badge.bg-danger {
+    background-color: #dc3545 !important;
+}
+
 /* Rating Stars */
 .bi-star-fill {
     color: #ffc107 !important;

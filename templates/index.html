@@ -14,6 +14,7 @@
             <a href="{{ url_for('index') }}" class="btn btn-outline-primary {% if not filter_type %}active{% endif %}">All</a>
             <a href="{{ url_for('filter_items', filter_type='movies') }}" class="btn btn-outline-primary {% if filter_type == 'movies' %}active{% endif %}">Movies</a>
             <a href="{{ url_for('filter_items', filter_type='series') }}" class="btn btn-outline-primary {% if filter_type == 'series' %}active{% endif %}">Series</a>
+            <a href="{{ url_for('filter_items', filter_type='anime') }}" class="btn btn-outline-primary {% if filter_type == 'anime' %}active{% endif %}">Anime</a>
             <a href="{{ url_for('watchlist') }}" class="btn btn-outline-success">Watchlist</a>
         </div>
     </div>
@@ -35,7 +36,7 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start mb-2">
                     <h5 class="card-title mb-0">{{ item.title }}</h5>
-                    <span class="badge bg-{{ 'info' if item.type == 'movie' else 'warning' }}">
+                    <span class="badge bg-{{ 'info' if item.type == 'movie' else 'warning' if item.type == 'series' else 'danger' }}">
                         {{ item.type|title }}
                     </span>
                 </div>
@@ -67,7 +68,15 @@
                 {% if item.duration %}
                 <p class="card-text mb-2">
                     <small class="text-muted">
-                        <i class="bi bi-clock"></i> {{ item.duration }}
+                        <i class="bi bi-clock"></i> {{ item.duration }} min{% if item.type in ['series', 'anime'] and item.episodes %} per episode{% endif %}
+                    </small>
+                </p>
+                {% endif %}
+                
+                {% if item.episodes and item.type in ['series', 'anime'] %}
+                <p class="card-text mb-2">
+                    <small class="text-muted">
+                        <i class="bi bi-collection"></i> {{ item.episodes }} episodes
                     </small>
                 </p>
                 {% endif %}

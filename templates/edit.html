@@ -2,6 +2,42 @@
 
 {% block title %}Edit Item - Movie & Series Tracker{% endblock %}
 
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const typeSelect = document.getElementById('type');
+    const episodesGroup = document.getElementById('episodes-group');
+    const durationLabel = document.getElementById('duration-label');
+    const durationInput = document.getElementById('duration');
+    const durationHelp = document.getElementById('duration-help');
+
+    function toggleFields() {
+        const selectedType = typeSelect.value;
+        if (selectedType === 'anime' || selectedType === 'series') {
+            episodesGroup.style.display = 'block';
+            durationLabel.textContent = 'Duration (minutes)';
+            durationInput.placeholder = 'e.g., 24';
+            durationHelp.textContent = 'Duration in minutes per episode';
+            durationInput.type = 'number';
+            durationInput.min = '1';
+            durationInput.step = '1';
+        } else {
+            episodesGroup.style.display = 'none';
+            durationLabel.textContent = 'Duration (minutes)';
+            durationInput.placeholder = 'e.g., 120';
+            durationHelp.textContent = 'Duration in minutes';
+            durationInput.type = 'number';
+            durationInput.min = '1';
+            durationInput.step = '1';
+        }
+    }
+
+    typeSelect.addEventListener('change', toggleFields);
+    toggleFields();
+});
+</script>
+{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-8 col-lg-6">
@@ -25,6 +61,7 @@
                         <select class="form-select" id="type" name="type" required>
                             <option value="movie" {% if item.type == 'movie' %}selected{% endif %}>Movie</option>
                             <option value="series" {% if item.type == 'series' %}selected{% endif %}>Series</option>
+                            <option value="anime" {% if item.type == 'anime' %}selected{% endif %}>Anime</option>
                         </select>
                     </div>
                     
@@ -47,9 +84,17 @@
                     </div>
                     
                     <div class="mb-3">
-                        <label for="duration" class="form-label">Duration</label>
-                        <input type="text" class="form-control" id="duration" name="duration" 
-                               value="{{ item.duration or '' }}" placeholder="e.g., 2h 30min or 10 episodes">
+                        <label for="duration" id="duration-label" class="form-label">Duration (minutes)</label>
+                        <input type="number" class="form-control" id="duration" name="duration" 
+                               min="1" step="1" value="{{ item.duration or '' }}" placeholder="e.g., 120">
+                        <div class="form-text" id="duration-help">Duration in minutes</div>
+                    </div>
+                    
+                    <div class="mb-3" id="episodes-group" style="{% if item.type not in ['series', 'anime'] %} display: none;{% endif %}">
+                        <label for="episodes" class="form-label">Number of Episodes</label>
+                        <input type="number" class="form-control" id="episodes" name="episodes" 
+                               min="1" step="1" value="{{ item.episodes or '' }}" placeholder="e.g., 24">
+                        <div class="form-text">Total number of episodes</div>
                     </div>
                     
                     <div class="mb-3">
