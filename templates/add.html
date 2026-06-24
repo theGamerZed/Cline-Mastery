@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Add New Item - Movie & Series Tracker{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">
+                    <i class="bi bi-plus-circle"></i> Add New Movie or Series
+                </h4>
+            </div>
+            
+            <div class="card-body">
+                <form action="{{ url_for('add_item') }}" method="POST">
+                    <div class="mb-3">
+                        <label for="title" class="form-label">Title *</label>
+                        <input type="text" class="form-control" id="title" name="title" required 
+                               placeholder="Enter title">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="type" class="form-label">Type *</label>
+                        <select class="form-select" id="type" name="type" required>
+                            <option value="">Select type...</option>
+                            <option value="movie">Movie</option>
+                            <option value="series">Series</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="genre" class="form-label">Genre</label>
+                        <input type="text" class="form-control" id="genre" name="genre" 
+                               placeholder="e.g., Action, Drama, Comedy">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="release_year" class="form-label">Release Year</label>
+                        <input type="number" class="form-control" id="release_year" name="release_year" 
+                               min="1900" max="2099" placeholder="e.g., 2024">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="rating" class="form-label">Rating (1-10)</label>
+                        <input type="number" class="form-control" id="rating" name="rating" 
+                               min="1" max="10" step="0.1" placeholder="e.g., 8.5">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="duration" class="form-label">Duration</label>
+                        <input type="text" class="form-control" id="duration" name="duration" 
+                               placeholder="e.g., 2h 30min or 10 episodes">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="poster_url" class="form-label">Poster URL</label>
+                        <input type="url" class="form-control" id="poster_url" name="poster_url" 
+                               placeholder="https://example.com/poster.jpg">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="4" 
+                                  placeholder="Enter description..."></textarea>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+                            <i class="bi bi-arrow-left"></i> Cancel
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> Save Item
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
