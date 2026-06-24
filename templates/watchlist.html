@@ -18,10 +18,73 @@
 </div>
 
 {% if items %}
+<!-- Hours Summary Banner -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card hours-summary-card shadow">
+            <div class="card-body position-relative overflow-hidden">
+                <div class="hours-summary-bg-icon">
+                    <i class="bi bi-clock-history"></i>
+                </div>
+                <div class="row align-items-center position-relative">
+                    <div class="col-md-8">
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="hours-icon-wrapper me-3">
+                                <i class="bi bi-stopwatch"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0 text-white fw-bold">Total Watch Time</h5>
+                                <small class="text-white-50">Based on episodes &times; duration</small>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-baseline flex-wrap gap-2 mt-3">
+                            <span class="hours-display" id="totalHoursDisplay">{{ total_hours }}</span>
+                            <span class="hours-unit">hours</span>
+                            <span class="hours-selection-badge text-white-50 ms-2">
+                                <i class="bi bi-check-circle-fill" id="selectionIcon" style="display:none;"></i>
+                                <span id="selectionLabel">all items</span>
+                            </span>
+                        </div>
+                        <!-- Animated progress bar -->
+                        <div class="progress hours-progress mt-3" style="height: 6px; max-width: 400px;">
+                            <div class="progress-bar hours-progress-bar" id="hoursProgressBar" role="progressbar" 
+                                 style="width: 100%;" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-md-end mt-3 mt-md-0">
+                        <div class="hours-stat-item">
+                            <div class="hours-stat-value" id="selectedCountDisplay">{{ items|length }}</div>
+                            <div class="hours-stat-label">items</div>
+                        </div>
+                        <div class="hours-stat-item mt-2">
+                            <div class="hours-stat-value" id="avgHoursDisplay">
+                                {% if items|length > 0 %}
+                                {{ (total_hours / items|length)|round(1) }}
+                                {% else %}0{% endif %}
+                            </div>
+                            <div class="hours-stat-label">avg hrs/item</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row">
     {% for item in items %}
     <div class="col-md-6 col-lg-4 mb-4">
-        <div class="card h-100 shadow-sm">
+        <div class="card h-100 shadow-sm watchlist-card" data-item-id="{{ item.id }}" data-hours="{{ item.hours }}" data-type="{{ item.type }}" data-is-watched="{{ 'true' if item.is_watched else 'false' }}">
+            {% if not item.is_watched %}
+            <!-- Selection overlay (hidden for watched items) -->
+            <div class="card-selection-overlay" onclick="toggleItem(this.closest('.watchlist-card'))">
+                <div class="card-checkbox-wrapper">
+                    <input type="checkbox" class="form-check-input item-checkbox" id="check-{{ item.id }}" checked
+                           onchange="toggleItem(this.closest('.watchlist-card'))">
+                </div>
+            </div>
+            {% endif %}
+
             {% if item.poster_url %}
             <img src="{{ item.poster_url }}" class="card-img-top" alt="{{ item.title }}" style="height: 200px; object-fit: cover;">
             {% else %}
@@ -64,6 +127,22 @@
                         My Rating: {{ item.user_rating }}/10
                     </span>
                     {% endif %}
+                </div>
+
+                <!-- Hours display for the item -->
+                <div class="item-hours-badge mb-1">
+                    <i class="bi bi-clock"></i>
+                    <span>
+                        {% if item.type == 'movie' %}
+                            {{ item.duration|default(0) }} min
+                            {% if item.hours > 0 %}
+                                &middot; <strong>{{ item.hours }}h</strong>
+                            {% endif %}
+                        {% else %}
+                            {{ item.episodes|default(0) }} ep &times; {{ item.duration|default(0) }} min
+                            &middot; <strong>{{ item.hours }}h</strong>
+                        {% endif %}
+                    </span>
                 </div>
                 
                 {% if item.notes %}
@@ -145,4 +224,103 @@
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Watch time calculation with item selection (excludes watched items)
+function recalculateHours() {
+    let total = 0;
+    let selectedCount = 0;
+    let selectableCount = 0;
+    const cards = document.querySelectorAll('.watchlist-card');
+    
+    cards.forEach(card => {
+        const isWatched = card.dataset.isWatched === 'true';
+        const checkbox = card.querySelector('.item-checkbox');
+        const hours = parseFloat(card.dataset.hours) || 0;
+        
+        // Watched items are excluded from calculations entirely
+        if (isWatched) {
+            card.classList.remove('card-selected');
+            return;
+        }
+        
+        selectableCount++;
+        if (checkbox.checked) {
+            total += hours;
+            selectedCount++;
+            card.classList.add('card-selected');
+        } else {
+            card.classList.remove('card-selected');
+        }
+    });
+    
+    total = Math.round(total * 10) / 10;
+    
+    // Update the summary display
+    const displayEl = document.getElementById('totalHoursDisplay');
+    const progressBar = document.getElementById('hoursProgressBar');
+    const selectionIcon = document.getElementById('selectionIcon');
+    const selectionLabel = document.getElementById('selectionLabel');
+    const selectedCountEl = document.getElementById('selectedCountDisplay');
+    const avgHoursEl = document.getElementById('avgHoursDisplay');
+    
+    // Animate the number change
+    if (displayEl) {
+        displayEl.style.transform = 'scale(1.2)';
+        setTimeout(() => { displayEl.style.transform = 'scale(1)'; }, 200);
+        displayEl.textContent = total;
+    }
+    
+    // Update progress bar (based on selectable items only)
+    if (progressBar) {
+        const pct = selectableCount > 0 ? (selectedCount / selectableCount) * 100 : 0;
+        progressBar.style.width = pct + '%';
+        progressBar.setAttribute('aria-valuenow', pct);
+    }
+    
+    // Update selection badge
+    if (selectionIcon) {
+        selectionIcon.style.display = selectedCount === selectableCount ? 'none' : 'inline-block';
+    }
+    if (selectionLabel) {
+        selectionLabel.textContent = selectedCount === selectableCount ? 'all unwatched items' : `${selectedCount} item${selectedCount !== 1 ? 's' : ''} selected`;
+    }
+    
+    // Update stats (show count of selected items)
+    if (selectedCountEl) selectedCountEl.textContent = selectedCount;
+    if (avgHoursEl) {
+        const avg = selectedCount > 0 ? (total / selectedCount) : 0;
+        avgHoursEl.textContent = avg.toFixed(1);
+    }
+}
+
+function toggleItem(card) {
+    if (!card) return;
+    const isWatched = card.dataset.isWatched === 'true';
+    // Do not toggle watched items
+    if (isWatched) return;
+    const checkbox = card.querySelector('.item-checkbox');
+    checkbox.checked = !checkbox.checked;
+    recalculateHours();
+}
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', function() {
+    recalculateHours();
+    
+    // Add click handler for card body (excluding footer, links, buttons, and watched items)
+    document.querySelectorAll('.watchlist-card').forEach(card => {
+        const isWatched = card.dataset.isWatched === 'true';
+        if (isWatched) return; // Skip click handler for watched items
+        
+        card.querySelector('.card-body').addEventListener('click', function(e) {
+            // Don't toggle if clicking a link, button, or badge
+            if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.badge')) return;
+            toggleItem(this.closest('.watchlist-card'));
+        });
+    });
+});
+</script>
 {% endblock %}

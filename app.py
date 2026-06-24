@@ -303,10 +303,27 @@ def watchlist():
         JOIN movies m ON w.movie_id = m.id
         ORDER BY w.added_at DESC
     ''')
-    items = cursor.fetchall()
+    raw_items = cursor.fetchall()
+    
+    # Calculate watch hours for each item (exclude watched items from total)
+    items = []
+    total_hours = 0.0
+    for item in raw_items:
+        item = dict(item)
+        if item['type'] == 'movie':
+            item['hours'] = round((item['duration'] or 0) / 60, 1)
+        else:
+            item['hours'] = round((item.get('episodes') or 0) * (item['duration'] or 0) / 60, 1)
+        # Mark whether this item is already watched (excluded from total)
+        item['is_watched'] = item['status'] == 'watched'
+        if not item['is_watched']:
+            total_hours += item['hours']
+        items.append(item)
+    
+    total_hours = round(total_hours, 1)
     
     conn.close()
-    return render_template('watchlist.html', items=items)
+    return render_template('watchlist.html', items=items, total_hours=total_hours)
 
 
 @app.route('/add_to_watchlist/<int:id>', methods=['POST'])
