@@ -195,6 +195,7 @@ def add_item():
         episodes = request.form.get('episodes', type=int)
         description = request.form['description']
         poster_url = request.form['poster_url']
+        watchlist_action = request.form.get('watchlist_action', 'just_save')
         
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -203,6 +204,16 @@ def add_item():
             INSERT INTO movies (title, type, genre, release_year, rating, duration, episodes, description, poster_url)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (title, item_type, genre, release_year, rating, duration, episodes, description, poster_url))
+        
+        movie_id = cursor.lastrowid
+        
+        # Handle watchlist action
+        if watchlist_action in ('add_to_watchlist', 'mark_watched'):
+            status = 'watched' if watchlist_action == 'mark_watched' else 'plan_to_watch'
+            cursor.execute('''
+                INSERT INTO watchlist (movie_id, status)
+                VALUES (?, ?)
+            ''', (movie_id, status))
         
         conn.commit()
         conn.close()
