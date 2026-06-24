@@ -1,10 +1,12 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 import sqlite3
 import os
 from datetime import datetime
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('KEY')  
+app.secret_key = os.environ.get('KEY', 'fallback-secret-key-change-in-production')
 
 # Database configuration
 DATABASE = 'movies.db'
@@ -19,6 +21,16 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Create users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
     # Create movies table
     cursor.execute('''
@@ -53,7 +65,105 @@ def init_db():
     conn.close()
 
 
+# --- Authentication Decorator ---
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# --- Auth Routes ---
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    # If already logged in, redirect to home
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        email = request.form['email'].strip().lower()
+        password = request.form['password']
+        
+        if not email or not password:
+            flash('Please fill in all fields.', 'danger')
+            return render_template('login.html')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+        user = cursor.fetchone()
+        conn.close()
+        
+        if user and check_password_hash(user['password_hash'], password):
+            session['user_id'] = user['id']
+            session['user_email'] = user['email']
+            flash('Logged in successfully!', 'success')
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid email or password.', 'danger')
+    
+    return render_template('login.html')
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    # If already logged in, redirect to home
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        email = request.form['email'].strip().lower()
+        password = request.form['password']
+        confirm_password = request.form['confirm_password']
+        
+        if not email or not password or not confirm_password:
+            flash('Please fill in all fields.', 'danger')
+            return render_template('register.html')
+        
+        if password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return render_template('register.html')
+        
+        if len(password) < 6:
+            flash('Password must be at least 6 characters.', 'danger')
+            return render_template('register.html')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if email already exists
+        cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
+        if cursor.fetchone():
+            conn.close()
+            flash('An account with this email already exists.', 'danger')
+            return render_template('register.html')
+        
+        # Create user
+        password_hash = generate_password_hash(password)
+        cursor.execute('INSERT INTO users (email, password_hash) VALUES (?, ?)',
+                       (email, password_hash))
+        conn.commit()
+        conn.close()
+        
+        flash('Account created successfully! Please log in.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html')
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Logged out successfully.', 'success')
+    return redirect(url_for('login'))
+
+
+# --- Protected Routes ---
 @app.route('/')
+@login_required
 def index():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -72,6 +182,7 @@ def index():
 
 
 @app.route('/add', methods=['GET', 'POST'])
+@login_required
 def add_item():
     if request.method == 'POST':
         title = request.form['title']
@@ -101,6 +212,7 @@ def add_item():
 
 
 @app.route('/edit/<int:id>', methods=['GET', 'POST'])
+@login_required
 def edit_item(id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -136,6 +248,7 @@ def edit_item(id):
 
 
 @app.route('/delete/<int:id>')
+@login_required
 def delete_item(id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -149,6 +262,7 @@ def delete_item(id):
 
 
 @app.route('/watchlist')
+@login_required
 def watchlist():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -166,6 +280,7 @@ def watchlist():
 
 
 @app.route('/add_to_watchlist/<int:id>', methods=['POST'])
+@login_required
 def add_to_watchlist(id):
     status = request.form['status']
     rating = request.form.get('rating', None)
@@ -187,6 +302,7 @@ def add_to_watchlist(id):
 
 
 @app.route('/remove_from_watchlist/<int:id>')
+@login_required
 def remove_from_watchlist(id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -200,6 +316,7 @@ def remove_from_watchlist(id):
 
 
 @app.route('/search')
+@login_required
 def search():
     query = request.args.get('q', '')
     
@@ -221,6 +338,7 @@ def search():
 
 
 @app.route('/filter/<filter_type>')
+@login_required
 def filter_items(filter_type):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -255,4 +373,19 @@ def filter_items(filter_type):
 if __name__ == '__main__':
     if not os.path.exists(DATABASE):
         init_db()
+    else:
+        # Ensure users table exists in existing databases
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    
     app.run(debug=True, host='0.0.0.0', port=5000)
