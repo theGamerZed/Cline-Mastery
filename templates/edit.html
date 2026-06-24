@@ -109,6 +109,29 @@ document.addEventListener('DOMContentLoaded', function() {
                                   placeholder="Enter description...">{{ item.description or '' }}</textarea>
                     </div>
                     
+                    <hr class="my-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">After saving, also:</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="watchlist_action" id="actionJustSave" value="just_save" checked>
+                            <label class="form-check-label" for="actionJustSave">
+                                <i class="bi bi-floppy"></i> Just save — no watchlist entry
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="watchlist_action" id="actionAddWatchlist" value="add_to_watchlist">
+                            <label class="form-check-label" for="actionAddWatchlist">
+                                <i class="bi bi-plus-circle"></i> Save & add to watchlist
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="watchlist_action" id="actionMarkWatched" value="mark_watched">
+                            <label class="form-check-label" for="actionMarkWatched">
+                                <i class="bi bi-check-circle"></i> Save & mark as watched
+                            </label>
+                        </div>
+                    </div>
+                    
                     <div class="d-flex justify-content-between">
                         <a href="{{ url_for('index') }}" class="btn btn-secondary">
                             <i class="bi bi-arrow-left"></i> Cancel

@@ -240,6 +240,7 @@ def edit_item(id):
         episodes = request.form.get('episodes', type=int)
         description = request.form['description']
         poster_url = request.form['poster_url']
+        watchlist_action = request.form.get('watchlist_action', 'just_save')
         
         cursor.execute('''
             UPDATE movies 
@@ -247,6 +248,21 @@ def edit_item(id):
                 duration = ?, episodes = ?, description = ?, poster_url = ?
             WHERE id = ?
         ''', (title, item_type, genre, release_year, rating, duration, episodes, description, poster_url, id))
+        
+        # Handle watchlist action
+        if watchlist_action in ('add_to_watchlist', 'mark_watched'):
+            # Check if item already exists in watchlist
+            cursor.execute('SELECT id FROM watchlist WHERE movie_id = ?', (id,))
+            existing = cursor.fetchone()
+            status = 'watched' if watchlist_action == 'mark_watched' else 'plan_to_watch'
+            
+            if existing:
+                cursor.execute('UPDATE watchlist SET status = ? WHERE movie_id = ?', (status, id))
+            else:
+                cursor.execute('INSERT INTO watchlist (movie_id, status) VALUES (?, ?)', (id, status))
+        elif watchlist_action == 'just_save':
+            # Remove from watchlist if it was there
+            cursor.execute('DELETE FROM watchlist WHERE movie_id = ?', (id,))
         
         conn.commit()
         conn.close()
