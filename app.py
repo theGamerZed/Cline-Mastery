@@ -470,7 +470,7 @@ if __name__ == '__main__':
         if 'user_id' not in columns:
             # Recreate movies table with user_id
             cursor.execute('''
-                CREAT   E TABLE IF NOT EXISTS movies_new_migrate (
+                CREATE TABLE IF NOT EXISTS movies_new_migrate (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL DEFAULT 1,
                     title TEXT NOT NULL,
