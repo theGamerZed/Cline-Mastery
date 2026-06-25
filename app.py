@@ -36,6 +36,7 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS movies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             title TEXT NOT NULL,
             type TEXT NOT NULL CHECK(type IN ('movie', 'series', 'anime')),
             genre TEXT,
@@ -45,7 +46,8 @@ def init_db():
             episodes INTEGER,
             description TEXT,
             poster_url TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     ''')
     
@@ -53,12 +55,15 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS watchlist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             movie_id INTEGER,
             status TEXT CHECK(status IN ('watched', 'watching', 'plan_to_watch')),
             rating INTEGER CHECK(rating >= 1 AND rating <= 10),
             notes TEXT,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (movie_id) REFERENCES movies (id) ON DELETE CASCADE
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+            FOREIGN KEY (movie_id) REFERENCES movies (id) ON DELETE CASCADE,
+            UNIQUE(user_id, movie_id)
         )
     ''')
     
@@ -169,13 +174,14 @@ def index():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get all movies and series
+    # Get all movies and series for the current user
     cursor.execute('''
         SELECT m.*, w.status, w.rating as user_rating 
         FROM movies m 
-        LEFT JOIN watchlist w ON m.id = w.movie_id 
+        LEFT JOIN watchlist w ON m.id = w.movie_id AND w.user_id = ?
+        WHERE m.user_id = ?
         ORDER BY m.created_at DESC
-    ''')
+    ''', (session['user_id'], session['user_id']))
     items = cursor.fetchall()
     
     conn.close()
@@ -201,9 +207,9 @@ def add_item():
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO movies (title, type, genre, release_year, rating, duration, episodes, description, poster_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (title, item_type, genre, release_year, rating, duration, episodes, description, poster_url))
+            INSERT INTO movies (user_id, title, type, genre, release_year, rating, duration, episodes, description, poster_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (session['user_id'], title, item_type, genre, release_year, rating, duration, episodes, description, poster_url))
         
         movie_id = cursor.lastrowid
         
@@ -211,9 +217,9 @@ def add_item():
         if watchlist_action in ('add_to_watchlist', 'mark_watched'):
             status = 'watched' if watchlist_action == 'mark_watched' else 'plan_to_watch'
             cursor.execute('''
-                INSERT INTO watchlist (movie_id, status)
-                VALUES (?, ?)
-            ''', (movie_id, status))
+                INSERT INTO watchlist (user_id, movie_id, status)
+                VALUES (?, ?, ?)
+            ''', (session['user_id'], movie_id, status))
         
         conn.commit()
         conn.close()
@@ -246,23 +252,23 @@ def edit_item(id):
             UPDATE movies 
             SET title = ?, type = ?, genre = ?, release_year = ?, rating = ?, 
                 duration = ?, episodes = ?, description = ?, poster_url = ?
-            WHERE id = ?
-        ''', (title, item_type, genre, release_year, rating, duration, episodes, description, poster_url, id))
+            WHERE id = ? AND user_id = ?
+        ''', (title, item_type, genre, release_year, rating, duration, episodes, description, poster_url, id, session['user_id']))
         
         # Handle watchlist action
         if watchlist_action in ('add_to_watchlist', 'mark_watched'):
-            # Check if item already exists in watchlist
-            cursor.execute('SELECT id FROM watchlist WHERE movie_id = ?', (id,))
+            # Check if item already exists in user's watchlist
+            cursor.execute('SELECT id FROM watchlist WHERE movie_id = ? AND user_id = ?', (id, session['user_id']))
             existing = cursor.fetchone()
             status = 'watched' if watchlist_action == 'mark_watched' else 'plan_to_watch'
             
             if existing:
-                cursor.execute('UPDATE watchlist SET status = ? WHERE movie_id = ?', (status, id))
+                cursor.execute('UPDATE watchlist SET status = ? WHERE movie_id = ? AND user_id = ?', (status, id, session['user_id']))
             else:
-                cursor.execute('INSERT INTO watchlist (movie_id, status) VALUES (?, ?)', (id, status))
+                cursor.execute('INSERT INTO watchlist (user_id, movie_id, status) VALUES (?, ?, ?)', (session['user_id'], id, status))
         elif watchlist_action == 'just_save':
-            # Remove from watchlist if it was there
-            cursor.execute('DELETE FROM watchlist WHERE movie_id = ?', (id,))
+            # Remove from user's watchlist if it was there
+            cursor.execute('DELETE FROM watchlist WHERE movie_id = ? AND user_id = ?', (id, session['user_id']))
         
         conn.commit()
         conn.close()
@@ -270,9 +276,13 @@ def edit_item(id):
         flash('Item updated successfully!', 'success')
         return redirect(url_for('index'))
     
-    cursor.execute('SELECT * FROM movies WHERE id = ?', (id,))
+    cursor.execute('SELECT * FROM movies WHERE id = ? AND user_id = ?', (id, session['user_id']))
     item = cursor.fetchone()
     conn.close()
+    
+    if not item:
+        flash('Item not found or access denied.', 'danger')
+        return redirect(url_for('index'))
     
     return render_template('edit.html', item=item)
 
@@ -283,7 +293,7 @@ def delete_item(id):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute('DELETE FROM movies WHERE id = ?', (id,))
+    cursor.execute('DELETE FROM movies WHERE id = ? AND user_id = ?', (id, session['user_id']))
     conn.commit()
     conn.close()
     
@@ -301,8 +311,9 @@ def watchlist():
         SELECT m.*, w.status, w.rating as user_rating, w.notes, w.added_at
         FROM watchlist w
         JOIN movies m ON w.movie_id = m.id
+        WHERE w.user_id = ?
         ORDER BY w.added_at DESC
-    ''')
+    ''', (session['user_id'],))
     raw_items = cursor.fetchall()
     
     # Calculate watch hours for each item (exclude watched items from total)
@@ -337,9 +348,13 @@ def add_to_watchlist(id):
     cursor = conn.cursor()
     
     cursor.execute('''
-        INSERT OR REPLACE INTO watchlist (movie_id, status, rating, notes)
-        VALUES (?, ?, ?, ?)
-    ''', (id, status, rating, notes))
+        INSERT INTO watchlist (user_id, movie_id, status, rating, notes)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, movie_id) DO UPDATE SET
+            status = excluded.status,
+            rating = excluded.rating,
+            notes = excluded.notes
+    ''', (session['user_id'], id, status, rating, notes))
     
     conn.commit()
     conn.close()
@@ -354,7 +369,7 @@ def remove_from_watchlist(id):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute('DELETE FROM watchlist WHERE movie_id = ?', (id,))
+    cursor.execute('DELETE FROM watchlist WHERE movie_id = ? AND user_id = ?', (id, session['user_id']))
     conn.commit()
     conn.close()
     
@@ -373,10 +388,10 @@ def search():
     cursor.execute('''
         SELECT m.*, w.status, w.rating as user_rating 
         FROM movies m 
-        LEFT JOIN watchlist w ON m.id = w.movie_id 
-        WHERE m.title LIKE ? OR m.genre LIKE ?
+        LEFT JOIN watchlist w ON m.id = w.movie_id AND w.user_id = ?
+        WHERE (m.title LIKE ? OR m.genre LIKE ?) AND m.user_id = ?
         ORDER BY m.created_at DESC
-    ''', (f'%{query}%', f'%{query}%'))
+    ''', (session['user_id'], f'%{query}%', f'%{query}%', session['user_id']))
     
     items = cursor.fetchall()
     conn.close()
@@ -394,26 +409,26 @@ def filter_items(filter_type):
         cursor.execute('''
             SELECT m.*, w.status, w.rating as user_rating 
             FROM movies m 
-            LEFT JOIN watchlist w ON m.id = w.movie_id 
-            WHERE m.type = 'movie'
+            LEFT JOIN watchlist w ON m.id = w.movie_id AND w.user_id = ?
+            WHERE m.type = 'movie' AND m.user_id = ?
             ORDER BY m.created_at DESC
-        ''')
+        ''', (session['user_id'], session['user_id']))
     elif filter_type == 'series':
         cursor.execute('''
             SELECT m.*, w.status, w.rating as user_rating 
             FROM movies m 
-            LEFT JOIN watchlist w ON m.id = w.movie_id 
-            WHERE m.type = 'series'
+            LEFT JOIN watchlist w ON m.id = w.movie_id AND w.user_id = ?
+            WHERE m.type = 'series' AND m.user_id = ?
             ORDER BY m.created_at DESC
-        ''')
+        ''', (session['user_id'], session['user_id']))
     elif filter_type == 'anime':
         cursor.execute('''
             SELECT m.*, w.status, w.rating as user_rating 
             FROM movies m 
-            LEFT JOIN watchlist w ON m.id = w.movie_id 
-            WHERE m.type = 'anime'
+            LEFT JOIN watchlist w ON m.id = w.movie_id AND w.user_id = ?
+            WHERE m.type = 'anime' AND m.user_id = ?
             ORDER BY m.created_at DESC
-        ''')
+        ''', (session['user_id'], session['user_id']))
     elif filter_type == 'watchlist':
         return redirect(url_for('watchlist'))
     else:
@@ -443,23 +458,56 @@ if __name__ == '__main__':
             )
         ''')
         
-        # Add episodes column if it doesn't exist
+        # Check current movies table structure
         cursor.execute("PRAGMA table_info(movies)")
         columns = [col[1] for col in cursor.fetchall()]
         
+        # Add episodes column if it doesn't exist
         if 'episodes' not in columns:
             cursor.execute('ALTER TABLE movies ADD COLUMN episodes INTEGER')
         
+        # Add user_id column if it doesn't exist
+        if 'user_id' not in columns:
+            # Recreate movies table with user_id
+            cursor.execute('''
+                CREAT   E TABLE IF NOT EXISTS movies_new_migrate (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    title TEXT NOT NULL,
+                    type TEXT NOT NULL CHECK(type IN ('movie', 'series', 'anime')),
+                    genre TEXT,
+                    release_year INTEGER,
+                    rating REAL,
+                    duration INTEGER,
+                    episodes INTEGER,
+                    description TEXT,
+                    poster_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            ''')
+            cursor.execute('''
+                INSERT INTO movies_new_migrate (id, user_id, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at)
+                SELECT id, 1, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at
+                FROM movies
+            ''')
+            cursor.execute('DROP TABLE movies')
+            cursor.execute('ALTER TABLE movies_new_migrate RENAME TO movies')
+        
         # Migrate duration from TEXT to INTEGER if needed
-        if 'duration' in columns:
+        cursor.execute("PRAGMA table_info(movies)")
+        columns_after_movies = [col[1] for col in cursor.fetchall()]
+        
+        if 'duration' in columns_after_movies:
             cursor.execute("PRAGMA table_info(movies)")
             col_info = {col[1]: col for col in cursor.fetchall()}
             duration_type = col_info.get('duration', [None, None, None])[2]
             if duration_type and duration_type.upper() == 'TEXT':
                 # Create new table with correct schema and migrate data
                 cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS movies_new (
+                    CREATE TABLE IF NOT EXISTS movies_new_migrate2 (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
                         title TEXT NOT NULL,
                         type TEXT NOT NULL CHECK(type IN ('movie', 'series', 'anime')),
                         genre TEXT,
@@ -469,17 +517,46 @@ if __name__ == '__main__':
                         episodes INTEGER,
                         description TEXT,
                         poster_url TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
                     )
                 ''')
                 cursor.execute('''
-                    INSERT INTO movies_new (id, title, type, genre, release_year, rating, duration, description, poster_url, created_at)
-                    SELECT id, title, type, genre, release_year, rating, 
+                    INSERT INTO movies_new_migrate2 (id, user_id, title, type, genre, release_year, rating, duration, description, poster_url, created_at)
+                    SELECT id, user_id, title, type, genre, release_year, rating, 
                            CAST(duration AS INTEGER), description, poster_url, created_at
                     FROM movies
                 ''')
                 cursor.execute('DROP TABLE movies')
-                cursor.execute('ALTER TABLE movies_new RENAME TO movies')
+                cursor.execute('ALTER TABLE movies_new_migrate2 RENAME TO movies')
+        
+        # Migrate watchlist table to add user_id
+        cursor.execute("PRAGMA table_info(watchlist)")
+        watchlist_columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'user_id' not in watchlist_columns:
+            # Recreate watchlist table with user_id
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS watchlist_new_migrate (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    movie_id INTEGER,
+                    status TEXT CHECK(status IN ('watched', 'watching', 'plan_to_watch')),
+                    rating INTEGER CHECK(rating >= 1 AND rating <= 10),
+                    notes TEXT,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+                    FOREIGN KEY (movie_id) REFERENCES movies (id) ON DELETE CASCADE,
+                    UNIQUE(user_id, movie_id)
+                )
+            ''')
+            cursor.execute('''
+                INSERT INTO watchlist_new_migrate (id, user_id, movie_id, status, rating, notes, added_at)
+                SELECT id, 1, movie_id, status, rating, notes, added_at
+                FROM watchlist
+            ''')
+            cursor.execute('DROP TABLE watchlist')
+            cursor.execute('ALTER TABLE watchlist_new_migrate RENAME TO watchlist')
         
         # Update CHECK constraint to include 'anime' - recreate table if needed
         cursor.execute("PRAGMA table_info(movies)")
@@ -492,14 +569,15 @@ if __name__ == '__main__':
             if existing_types and all(t not in ('anime',) for t in existing_types):
                 # Try inserting a temp value to test constraint
                 try:
-                    cursor.execute("INSERT INTO movies (title, type) VALUES ('__test__', 'anime')")
+                    cursor.execute("INSERT INTO movies (title, type, user_id) VALUES ('__test__', 'anime', 1)")
                     cursor.execute("DELETE FROM movies WHERE title = '__test__'")
                 except sqlite3.OperationalError as e:
                     if 'CHECK' in str(e) or 'constraint' in str(e):
                         # Recreate table with new CHECK constraint
                         cursor.execute('''
-                            CREATE TABLE IF NOT EXISTS movies_new2 (
+                            CREATE TABLE IF NOT EXISTS movies_new_migrate3 (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                user_id INTEGER NOT NULL,
                                 title TEXT NOT NULL,
                                 type TEXT NOT NULL CHECK(type IN ('movie', 'series', 'anime')),
                                 genre TEXT,
@@ -509,16 +587,17 @@ if __name__ == '__main__':
                                 episodes INTEGER,
                                 description TEXT,
                                 poster_url TEXT,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
                             )
                         ''')
                         cursor.execute('''
-                            INSERT INTO movies_new2 (id, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at)
-                            SELECT id, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at
+                            INSERT INTO movies_new_migrate3 (id, user_id, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at)
+                            SELECT id, user_id, title, type, genre, release_year, rating, duration, episodes, description, poster_url, created_at
                             FROM movies
                         ''')
                         cursor.execute('DROP TABLE movies')
-                        cursor.execute('ALTER TABLE movies_new2 RENAME TO movies')
+                        cursor.execute('ALTER TABLE movies_new_migrate3 RENAME TO movies')
         
         conn.commit()
         conn.close()
