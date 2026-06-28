@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 import sqlite3
 import os
+import time
 from datetime import datetime
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -10,6 +11,70 @@ app.secret_key = os.environ.get('KEY', 'fallback-secret-key-change-in-production
 
 # Database configuration
 DATABASE = 'movies.db'
+
+# Rate limiting configuration
+RATE_LIMIT_MAX_ATTEMPTS = 5  # Max failed attempts before blocking
+RATE_LIMIT_WINDOW = 15 * 60  # 15 minutes in seconds
+RATE_LIMIT_BLOCK_DURATION = 30 * 60  # 30 minutes block duration
+
+# In-memory rate limit storage: {ip: {'attempts': int, 'blocked_until': int, 'first_attempt': int}}
+rate_limit_store = {}
+
+def get_client_ip():
+    """Get the client's IP address, handling proxies."""
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    return request.remote_addr
+
+def check_rate_limit():
+    """Check if the client is rate limited. Returns (is_blocked, message)"""
+    client_ip = get_client_ip()
+    current_time = time.time()
+    
+    if client_ip not in rate_limit_store:
+        return False, None
+    
+    data = rate_limit_store[client_ip]
+    
+    # Check if currently blocked
+    if data.get('blocked_until', 0) > current_time:
+        remaining_time = int(data['blocked_until'] - current_time)
+        return True, f"Too many failed login attempts. Please try again in {remaining_time // 60} minutes."
+    
+    # Check if window has expired - reset if first attempt was more than RATE_LIMIT_WINDOW ago
+    if data.get('first_attempt', 0) and current_time - data['first_attempt'] > RATE_LIMIT_WINDOW:
+        # Reset the counter
+        del rate_limit_store[client_ip]
+        return False, None
+    
+    # Check if max attempts reached
+    if data.get('attempts', 0) >= RATE_LIMIT_MAX_ATTEMPTS:
+        # Block the IP
+        rate_limit_store[client_ip]['blocked_until'] = current_time + RATE_LIMIT_BLOCK_DURATION
+        remaining_time = RATE_LIMIT_BLOCK_DURATION // 60
+        return True, f"Too many failed login attempts. You are blocked for {remaining_time} minutes."
+    
+    return False, None
+
+def record_failed_attempt():
+    """Record a failed login attempt"""
+    client_ip = get_client_ip()
+    current_time = time.time()
+    
+    if client_ip not in rate_limit_store:
+        rate_limit_store[client_ip] = {
+            'attempts': 1,
+            'first_attempt': current_time,
+            'blocked_until': 0
+        }
+    else:
+        rate_limit_store[client_ip]['attempts'] = rate_limit_store[client_ip].get('attempts', 0) + 1
+
+def reset_rate_limit():
+    """Reset rate limit after successful login"""
+    client_ip = get_client_ip()
+    if client_ip in rate_limit_store:
+        del rate_limit_store[client_ip]
 
 
 def get_db_connection():
@@ -89,7 +154,13 @@ def login():
     if 'user_id' in session:
         return redirect(url_for('index'))
     
+    # Check rate limit before processing POST request
     if request.method == 'POST':
+        is_blocked, message = check_rate_limit()
+        if is_blocked:
+            flash(message, 'danger')
+            return render_template('login.html')
+        
         email = request.form['email'].strip().lower()
         password = request.form['password']
         
@@ -104,11 +175,13 @@ def login():
         conn.close()
         
         if user and check_password_hash(user['password_hash'], password):
+            reset_rate_limit()  # Reset rate limit on successful login
             session['user_id'] = user['id']
             session['user_email'] = user['email']
             flash('Logged in successfully!', 'success')
             return redirect(url_for('index'))
         else:
+            record_failed_attempt()  # Record failed attempt
             flash('Invalid email or password.', 'danger')
     
     return render_template('login.html')
@@ -602,4 +675,4 @@ if __name__ == '__main__':
         conn.commit()
         conn.close()
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000)
